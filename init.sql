@@ -30,3 +30,6 @@ created_at timestamptz default now(),
 updated_at timestamptz default now(),
 unique(user_id, ig_media_id)
 );
+
+alter table users
+add column if not exists sync_enabled boolean not null default true;

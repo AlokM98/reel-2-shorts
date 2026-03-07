@@ -4,18 +4,19 @@ import { getLatestReel } from "../services/instagram";
 import { downloadVideoToTemp, cleanupTemp } from "../services/media";
 import { buildTitle, buildDescription, buildTagsFromCaption } from "../services/metadata";
 import { uploadToYouTube } from "../services/youtube";
+import notify = require("../services/notify");
 
 export async function runSync() {
     console.log("Worker running sync job at", new Date().toISOString());
 
     const users = await db.query(`
-select u.id, u.telegram_chat_id,
-max(case when c.provider='instagram' then c.access_token_enc end) as ig_token
-from users u
-join connections c on c.user_id=u.id
-group by u.id, u.telegram_chat_id
-having count(distinct c.provider) = 2
-`);
+        select u.id, u.telegram_chat_id,
+        max(case when c.provider='instagram' then c.access_token_enc end) as ig_token
+        from users u
+        join connections c on c.user_id=u.id
+        group by u.id, u.telegram_chat_id
+        having count(distinct c.provider) = 2
+    `);
 
     for (const user of users.rows) {
         try {
@@ -42,7 +43,7 @@ having count(distinct c.provider) = 2
 
             const tempFile = await downloadVideoToTemp(reel.media_url);
             let ytVideoId = "";
-
+            let privacyStatus = "private";
             try {
                 ytVideoId = await uploadToYouTube({
                     userId: user.id,
@@ -50,13 +51,17 @@ having count(distinct c.provider) = 2
                     title,
                     description,
                     tags,
+
                 });
                 console.log("Sync job created for user=", user.id, "ig=", reel.id, ytVideoId ? "upload success" : "upload failed");
                 await db.query(
-                "insert into sync_jobs(user_id, ig_media_id, status) values($1,$2,'pending')",
-                [user.id, reel.id]
+                    "insert into sync_jobs(user_id, ig_media_id, status) values($1,$2,'pending')",
+                    [user.id, reel.id]
                 );
-            } catch{
+
+                const successMsg = `🎉 Done! Your Reel is uploaded to YouTube Shorts.\n 🔗 Watch now: https://youtu.be/${ytVideoId}\n🔒 Visibility: ${privacyStatus}`;
+                await notify.sendTelegram(user.telegram_chat_id, successMsg);
+            } catch(e) {
                 console.error("Youtube upload failed for user=", user.id, "ig=", reel.id);
             } finally {
                 cleanupTemp(tempFile);
@@ -64,8 +69,8 @@ having count(distinct c.provider) = 2
 
             await db.query(
                 `update sync_jobs
-set status='uploaded', yt_video_id=$3, updated_at=now()
-where user_id=$1 and ig_media_id=$2`,
+                set status='uploaded', yt_video_id=$3, updated_at=now()
+                where user_id=$1 and ig_media_id=$2`,
                 [user.id, reel.id, ytVideoId]
             );
 
@@ -77,22 +82,18 @@ where user_id=$1 and ig_media_id=$2`,
                 status: e?.response?.status,
                 data: e?.response?.data,
             });
-
             await db.query(
                 `update sync_jobs
-set status='failed', error=$2, updated_at=now()
-where id = (
-select id from sync_jobs
-where user_id=$1 and status='pending'
-order by created_at desc
-limit 1
-)`,
+                set status='failed', error=$2, updated_at=now()
+                where id = (
+                select id from sync_jobs
+                where user_id=$1 and status='pending'
+                order by created_at desc
+                limit 1
+                )`,
                 [user.id, msg]
             );
+            await notify.sendTelegram(user.telegram_chat_id, `❌ Sync failed\nReason: ${e?.response?.data?.error?.message || e?.message}`);
         }
     }
 }
-
-// YF_@#s2qVGKEf4J
-
-// postgresql://postgres:YF_@#s2qVGKEf4J@db.pjfhonfpusfmolqqgnip.supabase.co:5432/postgres
