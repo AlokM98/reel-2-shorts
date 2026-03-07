@@ -6,7 +6,8 @@
   "scripts": {
     "dev:api": "tsx src/api/index.ts",
     "dev:bot": "tsx src/bot/index.ts",
-    "dev:worker": "tsx src/worker/index.ts"
+    "dev:worker": "tsx src/worker/index.ts",
+    "dev:combined": "tsx src/combined.ts"
   },
   "keywords": [],
   "author": "",
