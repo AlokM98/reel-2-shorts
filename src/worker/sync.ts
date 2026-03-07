@@ -6,6 +6,27 @@ import { buildTitle, buildDescription, buildTagsFromCaption } from "../services/
 import { uploadToYouTube } from "../services/youtube";
 import notify = require("../services/notify");
 
+function getErrorMessage(e: any): string {
+    return (
+        e?.response?.data?.error?.message ||
+        e?.response?.data?.error_description ||
+        e?.message ||
+        "Unknown error"
+    );
+}
+
+function isInstagramAuthExpiredError(e: any): boolean {
+    const msg = (getErrorMessage(e) || "").toLowerCase();
+
+    return (
+        msg.includes("error validating access token") ||
+        msg.includes("session has been invalidated") ||
+        msg.includes("user changed their password") ||
+        msg.includes("invalid oauth access token") ||
+        msg.includes("access token has expired")
+    );
+}
+
 export async function runSync() {
     console.log("Worker running sync job at", new Date().toISOString());
 
@@ -61,7 +82,7 @@ export async function runSync() {
 
                 const successMsg = `🎉 Done! Your Reel is uploaded to YouTube Shorts.\n 🔗 Watch now: https://youtu.be/${ytVideoId}\n🔒 Visibility: ${privacyStatus}`;
                 await notify.sendTelegram(user.telegram_chat_id, successMsg);
-            } catch(e) {
+            } catch (e) {
                 console.error("Youtube upload failed for user=", user.id, "ig=", reel.id);
             } finally {
                 cleanupTemp(tempFile);
@@ -76,12 +97,17 @@ export async function runSync() {
 
             console.log(`[SYNC] uploaded user=${user.id} ig=${reel.id} yt=${ytVideoId}`);
         } catch (e: any) {
-            const msg = JSON.stringify(e?.response?.data || e?.message || e);
+            const reason = getErrorMessage(e);
+
             console.error("sync error:", {
+                userId: user.id,
                 message: e?.message,
                 status: e?.response?.status,
+                reason,
                 data: e?.response?.data,
             });
+
+            // mark latest pending as failed
             await db.query(
                 `update sync_jobs
                 set status='failed', error=$2, updated_at=now()
@@ -91,9 +117,33 @@ export async function runSync() {
                 order by created_at desc
                 limit 1
                 )`,
-                [user.id, msg]
+                [user.id, reason]
             );
-            await notify.sendTelegram(user.telegram_chat_id, `❌ Sync failed\nReason: ${e?.response?.data?.error?.message || e?.message}`);
+
+            // Special handling for expired/invalid IG token
+            if (isInstagramAuthExpiredError(e)) {
+                // Option A: hard invalidate by removing instagram connection
+                await db.query(
+                    `delete from connections
+                    where user_id=$1 and provider='instagram'`,
+                    [user.id]
+                );
+
+                await notify.sendTelegram(
+                    user.telegram_chat_id,
+                    `⚠️ Instagram session expired for security reasons.\n\nPlease reconnect by running /connect_instagram`
+                );
+
+                // skip retries for this case
+                continue;
+            }
+
+            // generic failure alert
+            await notify.sendTelegram(
+                user.telegram_chat_id,
+                `❌ Sync failed\nReason: ${reason}`
+            );
         }
+
     }
 }
