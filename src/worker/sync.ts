@@ -83,7 +83,7 @@ export async function runSync() {
                 const successMsg = `🎉 Done! Your Reel is uploaded to YouTube Shorts.\n 🔗 Watch now: https://youtu.be/${ytVideoId}\n🔒 Visibility: ${privacyStatus}`;
                 await notify.sendTelegram(user.telegram_chat_id, successMsg);
             } catch (e) {
-                console.error("Youtube upload failed for user=", user.id, "ig=", reel.id);
+                console.error("Youtube upload failed for user=", e,  user.id, "ig=", reel.id);
             } finally {
                 cleanupTemp(tempFile);
             }
