@@ -65,7 +65,7 @@ export async function uploadToYouTube(input: {
     });
 
 
-    const tokenInfo = await oauth2Client.getAccessToken();
+    const tokenInfo = await oauth2.getAccessToken();
     if (!tokenInfo.token) throw new Error("No access token after refresh");
     const youtube = google.youtube({ version: "v3", auth: oauth2 });
 
