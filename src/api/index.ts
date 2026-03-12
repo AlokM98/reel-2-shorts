@@ -54,8 +54,11 @@ res.status(500).send(`Instagram auth failed: ${e.message}`);
 
 app.get("/oauth/youtube/start", async (req, res) => {
 const state = req.query.state as string;
-const scope = encodeURIComponent("https://www.googleapis.com/auth/youtube.upload");
-const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.GOOGLE_REDIRECT_URI!)}&response_type=code&access_type=offline&prompt=consent&scope=${scope}&state=${encodeURIComponent(state)}`;
+const scopes = [
+"https://www.googleapis.com/auth/youtube.upload",
+"https://www.googleapis.com/auth/youtube.readonly",
+];
+const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.GOOGLE_REDIRECT_URI!)}&response_type=code&access_type=offline&prompt=consent&scope=${encodeURIComponent(scopes.join(" "))}&state=${encodeURIComponent(state)}`;
 res.redirect(url);
 });
 

@@ -66,7 +66,11 @@ export async function uploadToYouTube(input: {
 
 
     const tokenInfo = await oauth2.getAccessToken();
+    console.log("YouTube access token refreshed", tokenInfo.token);
     if (!tokenInfo.token) throw new Error("No access token after refresh");
+
+    const info = await oauth2.getTokenInfo(tokenInfo.token);
+    console.log("Scopes:", info.scopes);
     const youtube = google.youtube({ version: "v3", auth: oauth2 });
 
     const resp = await youtube.videos.insert({
@@ -86,6 +90,15 @@ export async function uploadToYouTube(input: {
         media: {
             body: fs.createReadStream(input.filePath),
         },
+    }).catch((e) => {
+        console.error("YT upload failed", {
+                userId: input.userId,
+            status: e?.response?.status,
+            error: e?.response?.data?.error, // <-- key line
+            message: e?.response?.data?.error?.message,
+            errors: e?.response?.data?.error?.errors,
+            });
+        throw e;
     });
 
     return resp.data.id as string;
