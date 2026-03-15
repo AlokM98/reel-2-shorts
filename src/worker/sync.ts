@@ -27,6 +27,17 @@ function isInstagramAuthExpiredError(e: any): boolean {
     );
 }
 
+function isYouTubeAuthExpiredError(e: any): boolean {
+    const msg = (getErrorMessage(e) || "").toLowerCase();
+
+    return (
+        msg.includes("invalid_grant") ||
+        msg.includes("token has been expired") ||
+        msg.includes("token has been revoked") ||
+        msg.includes("youtube connection not found")
+    );
+}
+
 export async function runSync() {
     console.log("Worker running sync job at", new Date().toISOString());
 
@@ -132,6 +143,23 @@ export async function runSync() {
                 await notify.sendTelegram(
                     user.telegram_chat_id,
                     `⚠️ Instagram session expired for security reasons.\n\nPlease reconnect by running /connect_instagram`
+                );
+
+                // skip retries for this case
+                continue;
+            }
+
+            // Special handling for expired/invalid YouTube token
+            if (isYouTubeAuthExpiredError(e)) {
+                await db.query(
+                    `delete from connections
+                    where user_id=$1 and provider='youtube'`,
+                    [user.id]
+                );
+
+                await notify.sendTelegram(
+                    user.telegram_chat_id,
+                    `⚠️ YouTube session expired or was revoked.\n\nPlease reconnect by running /connect_youtube`
                 );
 
                 // skip retries for this case
