@@ -37,17 +37,43 @@ console.log("[IG] page check error:", p.id, e?.response?.data || e.message);
 throw new Error("No instagram_business_account linked to accessible page");
 }
 
-export async function getLatestReel(accessToken: string) {
+export async function getRecentReels(accessToken: string, limit = 25) {
 const { igUserId } = await resolveInstagramBusinessId(accessToken);
 
+const reels: any[] = [];
+let after: string | null = null;
+
+while (reels.length < limit) {
+const pageSize = Math.min(25, limit - reels.length);
 const mediaData = await graphGet(`/${igUserId}/media`, accessToken, {
 fields: "id,caption,media_type,media_url,permalink,timestamp,thumbnail_url",
-limit: 20,
+limit: pageSize,
+after: after || undefined,
 });
 
 const items: any[] = mediaData?.data ?? [];
-const reel = items.find((m) => m.media_type === "VIDEO" && m.media_url);
+const pageReels = items
+.filter((m) => m.media_type === "VIDEO" && m.media_url)
+.map((m) => ({
+id: m.id,
+caption: m.caption || "",
+media_url: m.media_url,
+permalink: m.permalink,
+timestamp: m.timestamp,
+}));
 
-console.log(`[IG] media fetched from ig=${igUserId}. items=${items.length}, selected=${reel?.id ?? "none"}`);
-return reel ?? null;
+reels.push(...pageReels);
+
+const nextAfter = mediaData?.paging?.cursors?.after;
+if (!nextAfter || !items.length) break;
+after = nextAfter;
+}
+
+console.log(`[IG] media fetched from ig=${igUserId}. reels=${reels.length}, requested=${limit}`);
+return reels.slice(0, limit);
+}
+
+export async function getLatestReel(accessToken: string) {
+const reels = await getRecentReels(accessToken, 20);
+return reels[0] ?? null;
 }
