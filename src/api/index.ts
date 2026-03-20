@@ -4,6 +4,7 @@ import "dotenv/config";
 import { verifyState } from "../core/state";
 import { db } from "../core/db";
 import { encrypt } from "../core/crypto";
+import notify = require("../services/notify");
 
 const app = express();
 
@@ -36,7 +37,6 @@ code
 });
 
 const accessToken = tokenResp.data.access_token as string;
-console.log("IG_ACCESS_TOKEN_DEBUG:", accessToken); // temporary
 
 await db.query(
 `insert into connections(user_id, provider, access_token_enc)
@@ -46,8 +46,25 @@ do update set access_token_enc=excluded.access_token_enc, updated_at=now()`,
 [state.uid, encrypt(accessToken)]
 );
 
-res.send("Instagram connected. You can return to Telegram.");
+await notify.sendTelegram(
+state.chatId,
+"✅ Instagram connected successfully!\nYou can now run /connect_youtube (if not connected yet) and start syncing 🚀"
+);
+
+res.send("Instagram connected successfully ✅ You can return to Telegram.");
 } catch (e: any) {
+const stateToken = req.query.state as string;
+try {
+if (stateToken) {
+const state = verifyState(stateToken);
+await notify.sendTelegram(
+state.chatId,
+`❌ Instagram connection failed.\nReason: ${e?.message || "Unknown error"}\n\nPlease run /connect_instagram to try again.`
+);
+}
+} catch {
+// ignore state parse issues
+}
 res.status(500).send(`Instagram auth failed: ${e.message}`);
 }
 });
@@ -90,8 +107,25 @@ updated_at=now()`,
 [state.uid, encrypt(access_token), encrypt(refresh_token ?? ""), String(expires_in ?? 3600)]
 );
 
-res.send("YouTube connected. You can return to Telegram.");
+await notify.sendTelegram(
+state.chatId,
+"✅ YouTube connected successfully!\nYour next reel will be uploaded automatically when sync runs 🎬"
+);
+
+res.send("YouTube connected successfully ✅ You can return to Telegram.");
 } catch (e: any) {
+const stateToken = req.query.state as string;
+try {
+if (stateToken) {
+const state = verifyState(stateToken);
+await notify.sendTelegram(
+state.chatId,
+`❌ YouTube connection failed.\nReason: ${e?.message || "Unknown error"}\n\nPlease run /connect_youtube to try again.`
+);
+}
+} catch {
+// ignore state parse issues
+}
 res.status(500).send(`YouTube auth failed: ${e.message}`);
 }
 });
