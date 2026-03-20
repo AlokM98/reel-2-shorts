@@ -29,12 +29,20 @@ function isInstagramAuthExpiredError(e: any): boolean {
 
 function isYouTubeAuthExpiredError(e: any): boolean {
     const msg = (getErrorMessage(e) || "").toLowerCase();
+    const reason = (e?.response?.data?.error?.errors?.[0]?.reason || "").toLowerCase();
+    const status = e?.response?.status;
 
     return (
+        status === 401 ||
+        msg.includes("unauthorized") ||
+        msg.includes("invalid credentials") ||
         msg.includes("invalid_grant") ||
         msg.includes("token has been expired") ||
         msg.includes("token has been revoked") ||
-        msg.includes("youtube connection not found")
+        msg.includes("youtube refresh token missing") ||
+        msg.includes("youtube connection not found") ||
+        reason.includes("autherror") ||
+        reason.includes("invalidcredentials")
     );
 }
 
@@ -51,10 +59,12 @@ export async function runSync() {
     `);
 
     for (const user of users.rows) {
+        let currentReelId: string | null = null;
         try {
             const igToken = decrypt(user.ig_token);
             const reel = await getLatestReel(igToken);
             if (!reel) continue;
+            currentReelId = reel.id;
 
             const exists = await db.query(
                 "select 1 from sync_jobs where user_id=$1 and ig_media_id=$2",
@@ -73,6 +83,11 @@ export async function runSync() {
             const tags = buildTagsFromCaption(caption);
             console.log("Youtube tags built for user=", user.id, "ig=", reel.id, "tags=", tags);
 
+            await db.query(
+                "insert into sync_jobs(user_id, ig_media_id, status) values($1,$2,'pending')",
+                [user.id, reel.id]
+            );
+
             const tempFile = await downloadVideoToTemp(reel.media_url);
             let ytVideoId = "";
             let privacyStatus = "private";
@@ -83,18 +98,7 @@ export async function runSync() {
                     title,
                     description,
                     tags,
-
                 });
-                console.log("Sync job created for user=", user.id, "ig=", reel.id, ytVideoId ? "upload success" : "upload failed");
-                await db.query(
-                    "insert into sync_jobs(user_id, ig_media_id, status) values($1,$2,'pending')",
-                    [user.id, reel.id]
-                );
-
-                const successMsg = `🎉 Done! Your Reel is uploaded to YouTube Shorts.\n 🔗 Watch now: https://youtu.be/${ytVideoId}\n🔒 Visibility: ${privacyStatus}`;
-                await notify.sendTelegram(user.telegram_chat_id, successMsg);
-            } catch (e) {
-                console.error("Youtube upload failed for user=", user.id, "ig=", reel.id, "error=", e);
             } finally {
                 cleanupTemp(tempFile);
             }
@@ -106,7 +110,9 @@ export async function runSync() {
                 [user.id, reel.id, ytVideoId]
             );
 
-            console.log(`[SYNC] uploaded user=${user.id} ig=${reel.id} yt=${ytVideoId}`);
+            console.log("Sync job uploaded for user=", user.id, "ig=", reel.id, "yt=", ytVideoId);
+            const successMsg = `🎉 Done! Your Reel is uploaded to YouTube Shorts.\n 🔗 Watch now: https://youtu.be/${ytVideoId}\n🔒 Visibility: ${privacyStatus}`;
+            await notify.sendTelegram(user.telegram_chat_id, successMsg);
         } catch (e: any) {
             const reason = getErrorMessage(e);
 
@@ -118,18 +124,15 @@ export async function runSync() {
                 data: e?.response?.data,
             });
 
-            // mark latest pending as failed
-            await db.query(
-                `update sync_jobs
-                set status='failed', error=$2, updated_at=now()
-                where id = (
-                select id from sync_jobs
-                where user_id=$1 and status='pending'
-                order by created_at desc
-                limit 1
-                )`,
-                [user.id, reason]
-            );
+            // mark current reel job as failed (if created)
+            if (currentReelId) {
+                await db.query(
+                    `update sync_jobs
+                    set status='failed', error=$3, updated_at=now()
+                    where user_id=$1 and ig_media_id=$2 and status='pending'`,
+                    [user.id, currentReelId, reason]
+                );
+            }
 
             // Special handling for expired/invalid IG token
             if (isInstagramAuthExpiredError(e)) {
