@@ -73,9 +73,15 @@ export async function runSync() {
                 jobs.rows.map((j: any) => [j.ig_media_id, j.status])
             );
 
+            const threeDaysAgoMs = Date.now() - 3 * 24 * 60 * 60 * 1000;
             const backlog = [...reels]
                 .reverse()
-                .filter((reel: any) => statusByMediaId.get(reel.id) !== "uploaded");
+                .filter((reel: any) => {
+                    const reelTimeMs = reel?.timestamp ? new Date(reel.timestamp).getTime() : 0;
+                    const withinLastThreeDays = reelTimeMs >= threeDaysAgoMs;
+                    const notUploaded = statusByMediaId.get(reel.id) !== "uploaded";
+                    return withinLastThreeDays && notUploaded;
+                });
 
             if (!backlog.length) {
                 console.log("No backlog for user=", user.id);
